@@ -57,6 +57,14 @@ audio{width:100%;margin-bottom:10px}
 <div class="warn">🎧 Use headphones, or the music will leak into the mic and cause feedback.</div>
 
 <div class="card">
+  <h2>Mode</h2>
+  <div class="chips"><button class="chip" id="modeSong">🎵 Sing with a song</button><button class="chip" id="modeLive">🎸 Play &amp; sing live</button></div>
+  <p class="note" id="modeNote"></p>
+  <label style="display:block;margin-top:10px;font-size:14px"><input type="checkbox" id="raw"> Raw recording (no reverb, echo or boost)</label>
+  <div class="sl"><label>Microphone / input</label><select id="inSel" style="width:100%"><option value="">Default</option></select></div>
+</div>
+
+<div class="card" id="songCard">
   <h2>1 · Instrumental</h2>
   <p class="song" id="songName">No song chosen yet</p>
   <label class="btn primary wide" for="file">Choose instrumental song</label>
@@ -122,7 +130,7 @@ audio{width:100%;margin-bottom:10px}
 (function(){
 'use strict';
 var $=function(id){return document.getElementById(id)};
-var mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
+var rawGain,recVoc,micAgc,micDev,recTimer,mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
 var audio=new Audio(); audio.preload='auto'; audio.setAttribute('playsinline','');
 audio.preservesPitch=true; audio.webkitPreservesPitch=true;
 var songTitle='song', monitorOn=true, recording=false, recorder=null, chunks=[], recMime='', lastBlob=null, lastUrl=null, seeking=false, lyrAuto=true;
@@ -135,7 +143,7 @@ var PRESETS=[
  {n:'Big echo',rev:25,size:20,echo:45,et:420},
  {n:'Stadium',rev:40,size:35,echo:35,et:500}
 ];
-var state={rev:40,size:28,echo:0,et:300,mic:150,mus:60,tempo:100,preset:'Hall'};
+var state={mode:'song',raw:false,dev:'',rev:40,size:28,echo:0,et:300,mic:150,mus:60,tempo:100,preset:'Hall'};
 try{var s=JSON.parse(localStorage.getItem('isingalong')||'null');if(s)for(var k in s)state[k]=s[k]}catch(e){}
 function save(){try{localStorage.setItem('isingalong',JSON.stringify(state))}catch(e){}}
 
@@ -149,7 +157,9 @@ function initAudio(){
  recDest=ctx.createMediaStreamDestination(); musicGain.connect(recDest);
  vocalBus=ctx.createGain(); monGain=ctx.createGain();
  lim=ctx.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.003; lim.release.value=0.1;
- vocalBus.connect(lim); lim.connect(monGain); monGain.connect(ctx.destination); lim.connect(recDest);
+ vocalBus.connect(lim); lim.connect(monGain); monGain.connect(ctx.destination);
+ recVoc=ctx.createGain(); lim.connect(recVoc); recVoc.connect(recDest);
+ rawGain=ctx.createGain(); rawGain.gain.value=0; rawGain.connect(recDest);
  hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=90;
  micGain=ctx.createGain();
  comp=ctx.createDynamicsCompressor(); comp.threshold.value=-24; comp.knee.value=24; comp.ratio.value=3; comp.attack.value=0.01; comp.release.value=0.2;
@@ -179,6 +189,7 @@ function applyAll(){
  echoRet.gain.value=0.9;
  delayN.delayTime.value=state.et/1000;
  monGain.gain.value=monitorOn?1:0;
+ recVoc.gain.value=state.raw?0:1; rawGain.gain.value=state.raw?state.mic/100:0; hp.frequency.value=state.mode==='live'?20:90;
  clearTimeout(irTimer); irTimer=setTimeout(function(){makeIR(state.size/10)},60);
  audio.playbackRate=state.tempo/100;
 }
@@ -188,7 +199,7 @@ function ui(){
  $('revV').textContent=state.rev+'%';$('sizeV').textContent=(state.size/10).toFixed(1)+' s';
  $('echoV').textContent=state.echo+'%';$('etV').textContent=state.et+' ms';
  $('micVv').textContent=state.mic+'%';$('musVv').textContent=state.mus+'%';$('tempoV').textContent=state.tempo+'%';
- var chips=document.querySelectorAll('.chip');for(var i=0;i<chips.length;i++)chips[i].classList.toggle('sel',chips[i].textContent===state.preset);
+ var chips=document.querySelectorAll('#presets .chip');for(var i=0;i<chips.length;i++)chips[i].classList.toggle('sel',chips[i].textContent===state.preset);
 }
 var pc=$('presets');
 PRESETS.forEach(function(p){var b=document.createElement('button');b.className='chip';b.textContent=p.n;b.onclick=function(){state.rev=p.rev;state.size=p.size;state.echo=p.echo;state.et=p.et;state.preset=p.n;ui();applyAll();save()};pc.appendChild(b)});
@@ -229,9 +240,13 @@ $('restart').onclick=function(){audio.currentTime=0};
 // mic
 function startMic(){
  initAudio();
- if(micStream)return Promise.resolve();
- return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}}).then(function(st){
-  micStream=st;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);
+ var agc=state.mode!=='live',dev=state.dev||'';
+ if(micStream&&micAgc===agc&&micDev===dev)return Promise.resolve();
+ if(micStream){micStream.getTracks().forEach(function(t){t.stop()});try{micSrc.disconnect()}catch(e){}micStream=null}
+ var cons={echoCancellation:false,noiseSuppression:false,autoGainControl:agc};
+ if(dev)cons.deviceId={exact:dev};
+ return navigator.mediaDevices.getUserMedia({audio:cons}).then(function(st){
+  micStream=st;micAgc=agc;micDev=dev;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);micSrc.connect(rawGain);listInputs();
   $('micBtn').textContent='🎤 Microphone is on';$('micBtn').style.background='#1d4a38';
  }).catch(function(){alert('Could not use the microphone. Please allow microphone access for this page in your browser settings.');throw 0});
 }
@@ -261,9 +276,9 @@ function countIn(){return new Promise(function(res){
  (function tick(){c.textContent=n;beep(n===1?1320:880,0.12);n--;if(n<0){c.style.display='none';res()}else setTimeout(tick,1000)})();
 })}
 function startRec(){
- if(!audio.src)return;
+ if(state.mode!=='live'&&!audio.src)return;
  startMic().then(function(){
-  audio.pause();audio.currentTime=0;
+  if(audio.src){audio.pause();audio.currentTime=0}
   return $('countIn').checked?countIn():Promise.resolve();
  }).then(function(){
   recMime=pickMime();chunks=[];
@@ -275,12 +290,13 @@ function startRec(){
    $('resAudio').src=lastUrl;$('result').style.display='block';$('recNote').textContent='Done! Listen back, then share or save.';
   };
   recorder.start(500);recording=true;
+  var t0=Date.now();clearInterval(recTimer);recTimer=setInterval(function(){if(recording)$('recNote').textContent='Recording… '+fmt((Date.now()-t0)/1000)},500);
   $('recBtn').textContent='■ Stop recording';$('recBtn').classList.add('on');$('recNote').textContent='Recording… sing!';
-  audio.playbackRate=state.tempo/100;audio.play();
+  if(state.mode!=='live'){audio.playbackRate=state.tempo/100;audio.play()}
  }).catch(function(){});
 }
 function stopRec(){
- recording=false;audio.pause();
+ recording=false;clearInterval(recTimer);audio.pause();
  if(recorder&&recorder.state!=='inactive')recorder.stop();
  $('recBtn').textContent='● Sing & Record';$('recBtn').classList.remove('on');
 }
@@ -296,7 +312,8 @@ function toWav(buf){
 }
 function extFor(t){return /mp4|m4a|aac/.test(t)?'m4a':/ogg/.test(t)?'ogg':'webm'}
 function deliver(blob,ext){
- var name='iSing Along - '+songTitle+'.'+ext,file;
+ var title=state.mode==='live'?'Live '+new Date().toISOString().slice(0,16).replace('T',' ').replace(':','-'):songTitle;
+ var name='iSing Along - '+title+'.'+ext,file;
  try{file=new File([blob],name,{type:blob.type})}catch(e){file=null}
  if(file&&navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file]}).catch(function(){});return}
  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){a.remove()},500);
@@ -313,6 +330,32 @@ $('shareBtn').onclick=function(){
 
 ui();
 $('fs').dispatchEvent(new Event('input'));
+
+function listInputs(){
+ if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
+ navigator.mediaDevices.enumerateDevices().then(function(ds){
+  var s=$('inSel'),cur=state.dev||'';s.innerHTML='';
+  var o=document.createElement('option');o.value='';o.textContent='Default';s.appendChild(o);
+  ds.filter(function(d){return d.kind==='audioinput'&&d.deviceId&&d.deviceId!=='default'}).forEach(function(d,i){var o2=document.createElement('option');o2.value=d.deviceId;o2.textContent=d.label||('Input '+(i+1));s.appendChild(o2)});
+  s.value=cur;
+ }).catch(function(){});
+}
+function syncMode(){
+ var live=state.mode==='live';
+ $('modeSong').classList.toggle('sel',!live);$('modeLive').classList.toggle('sel',live);
+ $('songCard').style.display=live?'none':'';
+ $('raw').checked=!!state.raw;
+ $('modeNote').textContent=live?'No backing song. Play your guitar or piano and sing; the mic records both. Use headphones, or turn Hear myself off, to avoid feedback.':'Sing over an instrumental song.';
+ $('recBtn').disabled=!live&&!audio.src;
+ if(!recording)$('recNote').textContent=live?'Records your playing and singing from the mic. Tap again to stop.':'Starts the song from the beginning and records your voice with the music. Tap again to stop.';
+ applyAll();
+ if(micStream)startMic().catch(function(){});
+}
+$('modeSong').onclick=function(){state.mode='song';state.raw=false;save();syncMode()};
+$('modeLive').onclick=function(){state.mode='live';state.raw=true;save();syncMode()};
+$('raw').onchange=function(){state.raw=this.checked;save();applyAll()};
+$('inSel').onchange=function(){state.dev=this.value;save();if(micStream)startMic().catch(function(){})};
+syncMode();
 })();
 </script>
 </body>
