@@ -90,6 +90,10 @@ audio{display:none}
     <div class="row"><button id="monBtn">🎧 Monitor: On</button></div></div>
   <div class="sl"><label>Microphone volume <b id="micVv">100%</b></label><input type="range" id="micVol" min="0" max="400" value="150"></div>
   <div class="sl"><label>Music volume <b id="musVv">80%</b></label><input type="range" id="musVol" min="0" max="100" value="80"></div>
+  <div class="sl"><label>Your voice in the recording <b id="vrecV"></b></label><input type="range" id="vrecS" min="50" max="500"></div>
+  <div class="sl"><label>Music in the recording <b id="mrecV"></b></label><input type="range" id="mrecS" min="10" max="100"></div>
+  <label style="display:block;margin-top:12px;font-size:14px"><input type="checkbox" id="spk"> I'm not using headphones (speaker mode)</label>
+  <p class="note">Speaker mode turns off "hear myself" and uses the phone's echo cancellation to reduce music leaking into the mic. Headphones still sound best.</p>
 </div>
 
 <div class="card">
@@ -138,7 +142,7 @@ audio{display:none}
 (function(){
 'use strict';
 var $=function(id){return document.getElementById(id)};
-var lyrStart=0,rawGain,recVoc,micAgc,micDev,recTimer,mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
+var lyrStart=0,lim2,recMus,rawGain,recVoc,micAgc,micDev,recTimer,mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
 var audio=new Audio(); audio.preload='auto'; audio.setAttribute('playsinline','');
 audio.preservesPitch=true; audio.webkitPreservesPitch=true;
 var songTitle='song', monitorOn=true, recording=false, recorder=null, chunks=[], recMime='', lastBlob=null, lastUrl=null, seeking=false, lyrAuto=true;
@@ -151,7 +155,7 @@ var PRESETS=[
  {n:'Big echo',rev:25,size:20,echo:45,et:420},
  {n:'Stadium',rev:40,size:35,echo:35,et:500}
 ];
-var state={mode:'song',raw:false,dev:'',rev:40,size:28,echo:0,et:300,mic:150,mus:60,tempo:100,preset:'Hall'};
+var state={spk:false,vrec:200,mrec:70,mode:'song',raw:false,dev:'',rev:40,size:28,echo:0,et:300,mic:150,mus:60,tempo:100,preset:'Hall'};
 try{var s=JSON.parse(localStorage.getItem('isingalong')||'null');if(s)for(var k in s)state[k]=s[k]}catch(e){}
 function save(){try{localStorage.setItem('isingalong',JSON.stringify(state))}catch(e){}}
 
@@ -162,12 +166,14 @@ function initAudio(){
  var AC=window.AudioContext||window.webkitAudioContext; ctx=new AC();
  musicSrc=ctx.createMediaElementSource(audio);
  musicGain=ctx.createGain(); musicSrc.connect(musicGain); musicGain.connect(ctx.destination);
- recDest=ctx.createMediaStreamDestination(); musicGain.connect(recDest);
+ recDest=ctx.createMediaStreamDestination();
+ lim2=ctx.createDynamicsCompressor(); lim2.threshold.value=-2; lim2.knee.value=0; lim2.ratio.value=20; lim2.attack.value=0.003; lim2.release.value=0.15; lim2.connect(recDest);
+ recMus=ctx.createGain(); musicGain.connect(recMus); recMus.connect(lim2);
  vocalBus=ctx.createGain(); monGain=ctx.createGain();
  lim=ctx.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.003; lim.release.value=0.1;
  vocalBus.connect(lim); lim.connect(monGain); monGain.connect(ctx.destination);
- recVoc=ctx.createGain(); lim.connect(recVoc); recVoc.connect(recDest);
- rawGain=ctx.createGain(); rawGain.gain.value=0; rawGain.connect(recDest);
+ recVoc=ctx.createGain(); lim.connect(recVoc); recVoc.connect(lim2);
+ rawGain=ctx.createGain(); rawGain.gain.value=0; rawGain.connect(lim2);
  hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=90;
  micGain=ctx.createGain();
  comp=ctx.createDynamicsCompressor(); comp.threshold.value=-24; comp.knee.value=24; comp.ratio.value=3; comp.attack.value=0.01; comp.release.value=0.2;
@@ -197,7 +203,7 @@ function applyAll(){
  echoRet.gain.value=0.9;
  delayN.delayTime.value=state.et/1000;
  monGain.gain.value=monitorOn?1:0;
- recVoc.gain.value=state.raw?0:1; rawGain.gain.value=state.raw?state.mic/100:0; hp.frequency.value=state.mode==='live'?20:90;
+ recVoc.gain.value=state.raw?0:state.vrec/100; rawGain.gain.value=state.raw?state.mic/100*state.vrec/100:0; recMus.gain.value=state.mrec/100; hp.frequency.value=state.mode==='live'?20:90;
  clearTimeout(irTimer); irTimer=setTimeout(function(){makeIR(state.size/10)},60);
  audio.playbackRate=state.tempo/100;
 }
@@ -206,7 +212,7 @@ function ui(){
  $('micVol').value=state.mic;$('musVol').value=state.mus;$('tempo').value=state.tempo;
  $('revV').textContent=state.rev+'%';$('sizeV').textContent=(state.size/10).toFixed(1)+' s';
  $('echoV').textContent=state.echo+'%';$('etV').textContent=state.et+' ms';
- $('micVv').textContent=state.mic+'%';$('musVv').textContent=state.mus+'%';$('tempoV').textContent=state.tempo+'%';
+ $('micVv').textContent=state.mic+'%';$('vrecS').value=state.vrec;$('vrecV').textContent=state.vrec+'%';$('mrecS').value=state.mrec;$('mrecV').textContent=state.mrec+'%';$('musVv').textContent=state.mus+'%';$('tempoV').textContent=state.tempo+'%';
  var chips=document.querySelectorAll('#presets .chip');for(var i=0;i<chips.length;i++)chips[i].classList.toggle('sel',chips[i].textContent===state.preset);
 }
 var pc=$('presets');
@@ -250,13 +256,13 @@ $('restart').onclick=function(){audio.currentTime=0};
 // mic
 function startMic(){
  initAudio();
- var agc=state.mode!=='live',dev=state.dev||'';
- if(micStream&&micAgc===agc&&micDev===dev)return Promise.resolve();
+ var agc=state.mode!=='live',ec=!!state.spk,dev=state.dev||'',key=agc+'|'+ec;
+ if(micStream&&micAgc===key&&micDev===dev)return Promise.resolve();
  if(micStream){micStream.getTracks().forEach(function(t){t.stop()});try{micSrc.disconnect()}catch(e){}micStream=null}
- var cons={echoCancellation:false,noiseSuppression:false,autoGainControl:agc};
+ var cons={echoCancellation:ec,noiseSuppression:false,autoGainControl:agc};
  if(dev)cons.deviceId={exact:dev};
  return navigator.mediaDevices.getUserMedia({audio:cons}).then(function(st){
-  micStream=st;micAgc=agc;micDev=dev;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);micSrc.connect(rawGain);listInputs();
+  micStream=st;micAgc=key;micDev=dev;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);micSrc.connect(rawGain);listInputs();
   $('micBtn').textContent='🎤 Microphone is on';$('micBtn').style.background='#1d4a38';
  }).catch(function(){alert('Could not use the microphone. Please allow microphone access for this page in your browser settings.');throw 0});
 }
@@ -341,6 +347,10 @@ $('shareBtn').onclick=function(){
 ui();
 $('fs').dispatchEvent(new Event('input'));
 
+[['vrecS','vrec'],['mrecS','mrec']].forEach(function(a){$(a[0]).addEventListener('input',function(){state[a[1]]=+this.value;ui();applyAll();save()})});
+$('spk').checked=!!state.spk;
+if(state.spk){monitorOn=false;$('monBtn').textContent='🎧 Monitor: Off'}
+$('spk').onchange=function(){state.spk=this.checked;if(state.spk){monitorOn=false;$('monBtn').textContent='🎧 Monitor: Off'}save();applyAll();if(micStream)startMic().catch(function(){})};
 function updLS(){$('lsNote').textContent='Lyrics start scrolling at '+fmt(lyrStart)+'. Play the song and tap the button when the singing begins.'}
 function setLS(v){lyrStart=v;try{localStorage.setItem('isingalong-ls-'+songTitle,String(v))}catch(e){}updLS()}
 $('lsSet').onclick=function(){setLS(audio.currentTime||0)};
