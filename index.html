@@ -75,7 +75,7 @@ audio{width:100%;margin-bottom:10px}
   <div class="meter"><i id="meter"></i></div>
   <div class="sl"><label>Hear myself <b id="monV">On</b></label>
     <div class="row"><button id="monBtn">🎧 Monitor: On</button></div></div>
-  <div class="sl"><label>Microphone volume <b id="micVv">100%</b></label><input type="range" id="micVol" min="0" max="200" value="100"></div>
+  <div class="sl"><label>Microphone volume <b id="micVv">100%</b></label><input type="range" id="micVol" min="0" max="400" value="150"></div>
   <div class="sl"><label>Music volume <b id="musVv">80%</b></label><input type="range" id="musVol" min="0" max="100" value="80"></div>
 </div>
 
@@ -122,7 +122,7 @@ audio{width:100%;margin-bottom:10px}
 (function(){
 'use strict';
 var $=function(id){return document.getElementById(id)};
-var ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
+var mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
 var audio=new Audio(); audio.preload='auto'; audio.setAttribute('playsinline','');
 audio.preservesPitch=true; audio.webkitPreservesPitch=true;
 var songTitle='song', monitorOn=true, recording=false, recorder=null, chunks=[], recMime='', lastBlob=null, lastUrl=null, seeking=false, lyrAuto=true;
@@ -135,7 +135,7 @@ var PRESETS=[
  {n:'Big echo',rev:25,size:20,echo:45,et:420},
  {n:'Stadium',rev:40,size:35,echo:35,et:500}
 ];
-var state={rev:40,size:28,echo:0,et:300,mic:100,mus:80,tempo:100,preset:'Hall'};
+var state={rev:40,size:28,echo:0,et:300,mic:150,mus:60,tempo:100,preset:'Hall'};
 try{var s=JSON.parse(localStorage.getItem('isingalong')||'null');if(s)for(var k in s)state[k]=s[k]}catch(e){}
 function save(){try{localStorage.setItem('isingalong',JSON.stringify(state))}catch(e){}}
 
@@ -147,7 +147,9 @@ function initAudio(){
  musicSrc=ctx.createMediaElementSource(audio);
  musicGain=ctx.createGain(); musicSrc.connect(musicGain); musicGain.connect(ctx.destination);
  recDest=ctx.createMediaStreamDestination(); musicGain.connect(recDest);
- vocalBus=ctx.createGain(); monGain=ctx.createGain(); vocalBus.connect(monGain); monGain.connect(ctx.destination); vocalBus.connect(recDest);
+ vocalBus=ctx.createGain(); monGain=ctx.createGain();
+ lim=ctx.createDynamicsCompressor(); lim.threshold.value=-3; lim.knee.value=0; lim.ratio.value=20; lim.attack.value=0.003; lim.release.value=0.1;
+ vocalBus.connect(lim); lim.connect(monGain); monGain.connect(ctx.destination); lim.connect(recDest);
  hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=90;
  micGain=ctx.createGain();
  comp=ctx.createDynamicsCompressor(); comp.threshold.value=-24; comp.knee.value=24; comp.ratio.value=3; comp.attack.value=0.01; comp.release.value=0.2;
@@ -155,9 +157,10 @@ function initAudio(){
  revSend=ctx.createGain(); conv=ctx.createConvolver(); revRet=ctx.createGain(); revRet.gain.value=1;
  echoSend=ctx.createGain(); delayN=ctx.createDelay(2); fb=ctx.createGain(); fb.gain.value=0.42; fbLP=ctx.createBiquadFilter(); fbLP.type='lowpass'; fbLP.frequency.value=3200; echoRet=ctx.createGain();
  hp.connect(micGain); micGain.connect(comp);
- comp.connect(dry); dry.connect(vocalBus);
- comp.connect(revSend); revSend.connect(conv); conv.connect(revRet); revRet.connect(vocalBus);
- comp.connect(echoSend); echoSend.connect(delayN); delayN.connect(fbLP); fbLP.connect(fb); fb.connect(delayN); fbLP.connect(echoRet); echoRet.connect(vocalBus);
+ mk=ctx.createGain(); mk.gain.value=3; comp.connect(mk);
+ mk.connect(dry); dry.connect(vocalBus);
+ mk.connect(revSend); revSend.connect(conv); conv.connect(revRet); revRet.connect(vocalBus);
+ mk.connect(echoSend); echoSend.connect(delayN); delayN.connect(fbLP); fbLP.connect(fb); fb.connect(delayN); fbLP.connect(echoRet); echoRet.connect(vocalBus);
  analyser=ctx.createAnalyser(); analyser.fftSize=512; micGain.connect(analyser);
  applyAll(); meterLoop();
 }
@@ -227,7 +230,7 @@ $('restart').onclick=function(){audio.currentTime=0};
 function startMic(){
  initAudio();
  if(micStream)return Promise.resolve();
- return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}).then(function(st){
+ return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}}).then(function(st){
   micStream=st;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);
   $('micBtn').textContent='🎤 Microphone is on';$('micBtn').style.background='#1d4a38';
  }).catch(function(){alert('Could not use the microphone. Please allow microphone access for this page in your browser settings.');throw 0});
