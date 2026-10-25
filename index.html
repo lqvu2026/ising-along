@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>iSing Along</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="apple-touch-icon" sizes="180x180" href="ising-along-icon.png">
+<link rel="icon" href="ising-along-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="iSing Along">
+<meta name="theme-color" content="#14111f">
+<style>
+:root{--bg:#14111f;--card:#1f1b2e;--card2:#2a2540;--text:#f4f1ff;--mute:#9d97b8;--accent:#ff4f8b;--accent2:#7c5cff;--ok:#3ddc97}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:max(14px,env(safe-area-inset-top)) 14px max(30px,env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto}
+h1{font-size:28px;margin:6px 0 2px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--mute);margin:0 0 14px;font-size:14px}
+.card{background:var(--card);border-radius:18px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:0 0 10px}
+button,.btn{font:inherit;color:var(--text);background:var(--card2);border:0;border-radius:14px;padding:12px 14px;cursor:pointer;display:inline-block;text-align:center}
+button:active,.btn:active{opacity:.7}
+button:disabled{opacity:.4}
+.primary{background:linear-gradient(90deg,var(--accent2),var(--accent));font-weight:600}
+.rec{background:var(--accent);font-weight:700}
+.rec.on{background:#fff;color:#c00}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.wide{width:100%}
+input[type=file]{display:none}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.sl{margin:10px 0 0}
+.sl label{display:flex;justify-content:space-between;font-size:14px;color:var(--mute)}
+.sl label b{color:var(--text);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:8px 14px;border-radius:999px;font-size:14px}
+.chip.sel{background:var(--accent2);font-weight:600}
+.time{display:flex;justify-content:space-between;color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
+.song{font-weight:600;margin:0 0 8px;word-break:break-word}
+.meter{height:8px;background:var(--card2);border-radius:99px;overflow:hidden;margin-top:10px}
+.meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .06s}
+.note{font-size:13px;color:var(--mute);margin:8px 0 0}
+.warn{background:#3a2a14;color:#ffd9a0;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+textarea{width:100%;min-height:110px;background:var(--card2);color:var(--text);border:0;border-radius:12px;padding:10px;font:inherit;resize:vertical}
+#lyricsView{display:none;background:var(--card2);border-radius:12px;padding:14px;height:240px;overflow-y:auto;white-space:pre-wrap;text-align:center;line-height:1.6;font-size:22px}
+select{font:inherit;background:var(--card2);color:var(--text);border:0;border-radius:12px;padding:10px}
+audio{width:100%;margin-bottom:10px}
+.count{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,8,20,.8);font-size:110px;font-weight:800;z-index:9}
+</style>
+</head>
+<body>
+<main>
+<h1>🎤 iSing Along</h1>
+<p class="sub">Pick an instrumental, sing, add reverb or echo, and save your performance.</p>
+
+<div class="warn">🎧 Use headphones, or the music will leak into the mic and cause feedback.</div>
+
+<div class="card">
+  <h2>1 · Instrumental</h2>
+  <p class="song" id="songName">No song chosen yet</p>
+  <label class="btn primary wide" for="file">Choose instrumental song</label>
+  <input type="file" id="file" accept="audio/*,.mp3,.m4a,.wav">
+  <input type="range" id="seek" min="0" max="1000" value="0" style="margin-top:12px" disabled>
+  <div class="time"><span id="tCur">0:00</span><span id="tDur">0:00</span></div>
+  <div class="row" style="margin-top:10px">
+    <button id="restart" disabled>⏮ Restart</button>
+    <button id="play" disabled>▶ Play</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2 · Your voice</h2>
+  <button id="micBtn" class="wide">Turn on microphone</button>
+  <div class="meter"><i id="meter"></i></div>
+  <div class="sl"><label>Hear myself <b id="monV">On</b></label>
+    <div class="row"><button id="monBtn">🎧 Monitor: On</button></div></div>
+  <div class="sl"><label>Microphone volume <b id="micVv">100%</b></label><input type="range" id="micVol" min="0" max="200" value="100"></div>
+  <div class="sl"><label>Music volume <b id="musVv">80%</b></label><input type="range" id="musVol" min="0" max="100" value="80"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Make it sound better</h2>
+  <div class="chips" id="presets"></div>
+  <div class="sl"><label>Reverb <b id="revV"></b></label><input type="range" id="rev" min="0" max="100"></div>
+  <div class="sl"><label>Room size <b id="sizeV"></b></label><input type="range" id="size" min="3" max="60"></div>
+  <div class="sl"><label>Echo <b id="echoV"></b></label><input type="range" id="echo" min="0" max="100"></div>
+  <div class="sl"><label>Echo time <b id="etV"></b></label><input type="range" id="et" min="80" max="900"></div>
+  <div class="sl"><label>Song speed (pitch stays) <b id="tempoV">100%</b></label><input type="range" id="tempo" min="70" max="125" value="100"></div>
+</div>
+
+<div class="card">
+  <h2>Lyrics</h2>
+  <textarea id="lyrics" placeholder="Paste your lyrics here…"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button id="lyrToggle">Show lyrics screen</button>
+    <button id="lyrAuto">Auto-scroll: On</button>
+  </div>
+  <div class="sl"><label>Text size <b id="fsV">22</b></label><input type="range" id="fs" min="16" max="40" value="22"></div>
+  <div id="lyricsView" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <h2>4 · Record</h2>
+  <button id="recBtn" class="rec wide" disabled>● Sing &amp; Record</button>
+  <div class="row" style="margin-top:8px;flex:0">
+    <label style="color:var(--mute);font-size:14px;flex:2"><input type="checkbox" id="countIn" checked> 3-2-1 count-in</label>
+  </div>
+  <p class="note" id="recNote">Starts the song from the beginning and records your voice with the music. Tap again to stop.</p>
+  <div id="result" style="display:none;margin-top:12px">
+    <audio id="resAudio" controls playsinline></audio>
+    <div class="row">
+      <select id="fmt"><option value="orig">Original format</option><option value="wav">WAV</option></select>
+      <button id="shareBtn" class="primary">Share / Save</button>
+    </div>
+  </div>
+</div>
+</main>
+<div class="count" id="count"></div>
+
+<script>
+(function(){
+'use strict';
+var $=function(id){return document.getElementById(id)};
+var ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
+var audio=new Audio(); audio.preload='auto'; audio.setAttribute('playsinline','');
+audio.preservesPitch=true; audio.webkitPreservesPitch=true;
+var songTitle='song', monitorOn=true, recording=false, recorder=null, chunks=[], recMime='', lastBlob=null, lastUrl=null, seeking=false, lyrAuto=true;
+var PRESETS=[
+ {n:'Dry',rev:0,size:10,echo:0,et:300},
+ {n:'Studio',rev:22,size:15,echo:0,et:300},
+ {n:'Hall',rev:40,size:28,echo:0,et:300},
+ {n:'Cathedral',rev:60,size:50,echo:10,et:400},
+ {n:'Slap echo',rev:15,size:12,echo:35,et:130},
+ {n:'Big echo',rev:25,size:20,echo:45,et:420},
+ {n:'Stadium',rev:40,size:35,echo:35,et:500}
+];
+var state={rev:40,size:28,echo:0,et:300,mic:100,mus:80,tempo:100,preset:'Hall'};
+try{var s=JSON.parse(localStorage.getItem('isingalong')||'null');if(s)for(var k in s)state[k]=s[k]}catch(e){}
+function save(){try{localStorage.setItem('isingalong',JSON.stringify(state))}catch(e){}}
+
+function fmt(t){if(!isFinite(t))t=0;var m=Math.floor(t/60),s=Math.floor(t%60);return m+':'+(s<10?'0':'')+s}
+
+function initAudio(){
+ if(ctx){if(ctx.state!=='running')ctx.resume();return}
+ var AC=window.AudioContext||window.webkitAudioContext; ctx=new AC();
+ musicSrc=ctx.createMediaElementSource(audio);
+ musicGain=ctx.createGain(); musicSrc.connect(musicGain); musicGain.connect(ctx.destination);
+ recDest=ctx.createMediaStreamDestination(); musicGain.connect(recDest);
+ vocalBus=ctx.createGain(); monGain=ctx.createGain(); vocalBus.connect(monGain); monGain.connect(ctx.destination); vocalBus.connect(recDest);
+ hp=ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=90;
+ micGain=ctx.createGain();
+ comp=ctx.createDynamicsCompressor(); comp.threshold.value=-24; comp.knee.value=24; comp.ratio.value=3; comp.attack.value=0.01; comp.release.value=0.2;
+ dry=ctx.createGain(); dry.gain.value=1;
+ revSend=ctx.createGain(); conv=ctx.createConvolver(); revRet=ctx.createGain(); revRet.gain.value=1;
+ echoSend=ctx.createGain(); delayN=ctx.createDelay(2); fb=ctx.createGain(); fb.gain.value=0.42; fbLP=ctx.createBiquadFilter(); fbLP.type='lowpass'; fbLP.frequency.value=3200; echoRet=ctx.createGain();
+ hp.connect(micGain); micGain.connect(comp);
+ comp.connect(dry); dry.connect(vocalBus);
+ comp.connect(revSend); revSend.connect(conv); conv.connect(revRet); revRet.connect(vocalBus);
+ comp.connect(echoSend); echoSend.connect(delayN); delayN.connect(fbLP); fbLP.connect(fb); fb.connect(delayN); fbLP.connect(echoRet); echoRet.connect(vocalBus);
+ analyser=ctx.createAnalyser(); analyser.fftSize=512; micGain.connect(analyser);
+ applyAll(); meterLoop();
+}
+var irTimer;
+function makeIR(sec){
+ var sr=ctx.sampleRate,len=Math.floor(sr*sec),b=ctx.createBuffer(2,len,sr);
+ for(var c=0;c<2;c++){var d=b.getChannelData(c);for(var i=0;i<len;i++){var t=i/len;d[i]=(Math.random()*2-1)*Math.pow(1-t,2.6)*(i<sr*0.012?i/(sr*0.012):1)}}
+ conv.buffer=b;
+}
+function applyAll(){
+ if(!ctx)return;
+ musicGain.gain.value=state.mus/100;
+ micGain.gain.value=state.mic/100;
+ revSend.gain.value=state.rev/100*0.9;
+ echoSend.gain.value=state.echo/100;
+ echoRet.gain.value=0.9;
+ delayN.delayTime.value=state.et/1000;
+ monGain.gain.value=monitorOn?1:0;
+ clearTimeout(irTimer); irTimer=setTimeout(function(){makeIR(state.size/10)},60);
+ audio.playbackRate=state.tempo/100;
+}
+function ui(){
+ $('rev').value=state.rev;$('size').value=state.size;$('echo').value=state.echo;$('et').value=state.et;
+ $('micVol').value=state.mic;$('musVol').value=state.mus;$('tempo').value=state.tempo;
+ $('revV').textContent=state.rev+'%';$('sizeV').textContent=(state.size/10).toFixed(1)+' s';
+ $('echoV').textContent=state.echo+'%';$('etV').textContent=state.et+' ms';
+ $('micVv').textContent=state.mic+'%';$('musVv').textContent=state.mus+'%';$('tempoV').textContent=state.tempo+'%';
+ var chips=document.querySelectorAll('.chip');for(var i=0;i<chips.length;i++)chips[i].classList.toggle('sel',chips[i].textContent===state.preset);
+}
+var pc=$('presets');
+PRESETS.forEach(function(p){var b=document.createElement('button');b.className='chip';b.textContent=p.n;b.onclick=function(){state.rev=p.rev;state.size=p.size;state.echo=p.echo;state.et=p.et;state.preset=p.n;ui();applyAll();save()};pc.appendChild(b)});
+[['rev'],['size'],['echo'],['et'],['micVol','mic'],['musVol','mus'],['tempo']].forEach(function(a){
+ $(a[0]).addEventListener('input',function(){state[a[1]||a[0]]=+this.value;state.preset='Custom';ui();applyAll();save()});
+});
+// tempo/volume shouldn't unselect presets
+['micVol','musVol','tempo'].forEach(function(id){$(id).addEventListener('input',function(){var p=PRESETS.filter(function(x){return x.rev===state.rev&&x.size===state.size&&x.echo===state.echo&&x.et===state.et})[0];state.preset=p?p.n:'Custom';ui()})});
+
+$('monBtn').onclick=function(){monitorOn=!monitorOn;this.textContent='🎧 Monitor: '+(monitorOn?'On':'Off');if(ctx)monGain.gain.value=monitorOn?1:0};
+
+// song
+$('file').addEventListener('change',function(){
+ var f=this.files&&this.files[0];if(!f)return;
+ if(recording)stopRec();
+ audio.pause();
+ audio.src=URL.createObjectURL(f);
+ songTitle=f.name.replace(/\.[^.]+$/,'');
+ $('songName').textContent=f.name;
+ ['seek','restart','play','recBtn'].forEach(function(id){$(id).disabled=false});
+ $('play').textContent='▶ Play';
+ audio.load();
+});
+audio.addEventListener('loadedmetadata',function(){$('tDur').textContent=fmt(audio.duration)});
+audio.addEventListener('timeupdate',function(){
+ $('tCur').textContent=fmt(audio.currentTime);
+ if(!seeking&&audio.duration)$('seek').value=Math.round(audio.currentTime/audio.duration*1000);
+ if(lyrAuto&&$('lyricsView').style.display==='block'&&audio.duration&&!audio.paused){var v=$('lyricsView');v.scrollTop=(audio.currentTime/audio.duration)*(v.scrollHeight-v.clientHeight)}
+});
+audio.addEventListener('ended',function(){$('play').textContent='▶ Play';if(recording)stopRec()});
+audio.addEventListener('pause',function(){$('play').textContent='▶ Play'});
+audio.addEventListener('play',function(){$('play').textContent='⏸ Pause'});
+$('seek').addEventListener('input',function(){seeking=true;if(audio.duration)audio.currentTime=this.value/1000*audio.duration});
+$('seek').addEventListener('change',function(){seeking=false});
+$('play').onclick=function(){initAudio();if(audio.paused){audio.playbackRate=state.tempo/100;audio.play()}else audio.pause()};
+$('restart').onclick=function(){audio.currentTime=0};
+
+// mic
+function startMic(){
+ initAudio();
+ if(micStream)return Promise.resolve();
+ return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}).then(function(st){
+  micStream=st;micSrc=ctx.createMediaStreamSource(st);micSrc.connect(hp);
+  $('micBtn').textContent='🎤 Microphone is on';$('micBtn').style.background='#1d4a38';
+ }).catch(function(){alert('Could not use the microphone. Please allow microphone access for this page in your browser settings.');throw 0});
+}
+$('micBtn').onclick=function(){startMic().catch(function(){})};
+function meterLoop(){
+ var buf=new Uint8Array(analyser.fftSize);
+ (function f(){analyser.getByteTimeDomainData(buf);var m=0;for(var i=0;i<buf.length;i++){var v=Math.abs(buf[i]-128)/128;if(v>m)m=v}
+  $('meter').style.width=Math.min(100,m*140)+'%';$('meter').style.background=m>0.8?'#ff5a5a':'#3ddc97';requestAnimationFrame(f)})();
+}
+
+// lyrics
+$('lyrics').addEventListener('input',function(){try{localStorage.setItem('isingalong-lyrics',this.value)}catch(e){}});
+try{$('lyrics').value=localStorage.getItem('isingalong-lyrics')||''}catch(e){}
+$('lyrToggle').onclick=function(){
+ var v=$('lyricsView'),show=v.style.display!=='block';
+ if(show){v.textContent=$('lyrics').value||'(No lyrics yet — paste them above.)';v.style.display='block';this.textContent='Hide lyrics screen'}
+ else{v.style.display='none';this.textContent='Show lyrics screen'}
+};
+$('lyrAuto').onclick=function(){lyrAuto=!lyrAuto;this.textContent='Auto-scroll: '+(lyrAuto?'On':'Off')};
+$('fs').addEventListener('input',function(){$('lyricsView').style.fontSize=this.value+'px';$('fsV').textContent=this.value});
+
+// recording
+function pickMime(){var c=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];for(var i=0;i<c.length;i++){if(window.MediaRecorder&&MediaRecorder.isTypeSupported(c[i]))return c[i]}return ''}
+function beep(f,d){var o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;g.gain.value=0.15;o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+d)}
+function countIn(){return new Promise(function(res){
+ var n=3,c=$('count');c.style.display='flex';
+ (function tick(){c.textContent=n;beep(n===1?1320:880,0.12);n--;if(n<0){c.style.display='none';res()}else setTimeout(tick,1000)})();
+})}
+function startRec(){
+ if(!audio.src)return;
+ startMic().then(function(){
+  audio.pause();audio.currentTime=0;
+  return $('countIn').checked?countIn():Promise.resolve();
+ }).then(function(){
+  recMime=pickMime();chunks=[];
+  try{recorder=recMime?new MediaRecorder(recDest.stream,{mimeType:recMime}):new MediaRecorder(recDest.stream)}catch(e){alert('Recording is not supported in this browser.');return}
+  recorder.ondataavailable=function(e){if(e.data&&e.data.size)chunks.push(e.data)};
+  recorder.onstop=function(){
+   lastBlob=new Blob(chunks,{type:recorder.mimeType||recMime||'audio/mp4'});
+   if(lastUrl)URL.revokeObjectURL(lastUrl);lastUrl=URL.createObjectURL(lastBlob);
+   $('resAudio').src=lastUrl;$('result').style.display='block';$('recNote').textContent='Done! Listen back, then share or save.';
+  };
+  recorder.start(500);recording=true;
+  $('recBtn').textContent='■ Stop recording';$('recBtn').classList.add('on');$('recNote').textContent='Recording… sing!';
+  audio.playbackRate=state.tempo/100;audio.play();
+ }).catch(function(){});
+}
+function stopRec(){
+ recording=false;audio.pause();
+ if(recorder&&recorder.state!=='inactive')recorder.stop();
+ $('recBtn').textContent='● Sing & Record';$('recBtn').classList.remove('on');
+}
+$('recBtn').onclick=function(){recording?stopRec():startRec()};
+
+function toWav(buf){
+ var ch=buf.numberOfChannels,sr=buf.sampleRate,n=buf.length,out=new DataView(new ArrayBuffer(44+n*ch*2));
+ function w(o,s){for(var i=0;i<s.length;i++)out.setUint8(o+i,s.charCodeAt(i))}
+ w(0,'RIFF');out.setUint32(4,36+n*ch*2,true);w(8,'WAVEfmt ');out.setUint32(16,16,true);out.setUint16(20,1,true);out.setUint16(22,ch,true);out.setUint32(24,sr,true);out.setUint32(28,sr*ch*2,true);out.setUint16(32,ch*2,true);out.setUint16(34,16,true);w(36,'data');out.setUint32(40,n*ch*2,true);
+ var data=[],o=44;for(var c=0;c<ch;c++)data.push(buf.getChannelData(c));
+ for(var i=0;i<n;i++)for(var c2=0;c2<ch;c2++){var v=Math.max(-1,Math.min(1,data[c2][i]));out.setInt16(o,v<0?v*0x8000:v*0x7fff,true);o+=2}
+ return new Blob([out],{type:'audio/wav'});
+}
+function extFor(t){return /mp4|m4a|aac/.test(t)?'m4a':/ogg/.test(t)?'ogg':'webm'}
+function deliver(blob,ext){
+ var name='iSing Along - '+songTitle+'.'+ext,file;
+ try{file=new File([blob],name,{type:blob.type})}catch(e){file=null}
+ if(file&&navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file]}).catch(function(){});return}
+ var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){a.remove()},500);
+}
+$('shareBtn').onclick=function(){
+ if(!lastBlob)return;
+ if($('fmt').value==='wav'){
+  var btn=this;btn.disabled=true;btn.textContent='Converting…';
+  lastBlob.arrayBuffer().then(function(ab){return new Promise(function(r,j){ctx.decodeAudioData(ab,r,j)})}).then(function(buf){
+   btn.disabled=false;btn.textContent='Share / Save';deliver(toWav(buf),'wav');
+  }).catch(function(){btn.disabled=false;btn.textContent='Share / Save';deliver(lastBlob,extFor(lastBlob.type))});
+ }else deliver(lastBlob,extFor(lastBlob.type));
+};
+
+ui();
+$('fs').dispatchEvent(new Event('input'));
+})();
+</script>
+</body>
+</html>
