@@ -45,7 +45,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 textarea{width:100%;min-height:110px;background:var(--card2);color:var(--text);border:0;border-radius:12px;padding:10px;font:inherit;resize:vertical}
 #lyricsView{display:none;background:var(--card2);border-radius:12px;padding:14px;height:240px;overflow-y:auto;white-space:pre-wrap;text-align:center;line-height:1.6;font-size:22px}
 select{font:inherit;background:var(--card2);color:var(--text);border:0;border-radius:12px;padding:10px}
-audio{width:100%;margin-bottom:10px}
+audio{display:none}
+.player{display:flex;gap:14px;align-items:center;margin-bottom:12px}
+.bigplay{width:68px;height:68px;border-radius:50%;font-size:28px;padding:0;flex:none;background:linear-gradient(135deg,var(--accent2),var(--accent));font-weight:700}
+.player input[type=range]{-webkit-appearance:none;appearance:none;height:12px;border-radius:99px;background:var(--card2);margin:10px 0}
+.player input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:30px;height:30px;border-radius:50%;background:#fff;border:0}
+.player input[type=range]::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:#fff;border:0}
 .count{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,8,20,.8);font-size:110px;font-weight:800;z-index:9}
 </style>
 </head>
@@ -104,6 +109,8 @@ audio{width:100%;margin-bottom:10px}
     <button id="lyrToggle">Show lyrics screen</button>
     <button id="lyrAuto">Auto-scroll: On</button>
   </div>
+  <div class="row" style="margin-top:8px"><button id="lsSet">📍 Lyrics start here</button><button id="lsReset">Reset</button></div>
+  <p class="note" id="lsNote"></p>
   <div class="sl"><label>Text size <b id="fsV">22</b></label><input type="range" id="fs" min="16" max="40" value="22"></div>
   <div id="lyricsView" style="margin-top:10px"></div>
 </div>
@@ -116,7 +123,8 @@ audio{width:100%;margin-bottom:10px}
   </div>
   <p class="note" id="recNote">Starts the song from the beginning and records your voice with the music. Tap again to stop.</p>
   <div id="result" style="display:none;margin-top:12px">
-    <audio id="resAudio" controls playsinline></audio>
+    <audio id="resAudio" playsinline></audio>
+    <div class="player"><button id="rPlay" class="bigplay" aria-label="Play">▶</button><div style="flex:1"><input type="range" id="rSeek" min="0" max="1000" value="0"><div class="time"><span id="rCur">0:00</span><span id="rDur">0:00</span></div></div></div>
     <div class="row">
       <select id="fmt"><option value="orig">Original format</option><option value="wav">WAV</option></select>
       <button id="shareBtn" class="primary">Share / Save</button>
@@ -130,7 +138,7 @@ audio{width:100%;margin-bottom:10px}
 (function(){
 'use strict';
 var $=function(id){return document.getElementById(id)};
-var rawGain,recVoc,micAgc,micDev,recTimer,mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
+var lyrStart=0,rawGain,recVoc,micAgc,micDev,recTimer,mk,lim,ctx,music,musicSrc,musicGain,micStream,micSrc,micGain,hp,comp,dry,revSend,conv,revRet,echoSend,delayN,fb,fbLP,echoRet,vocalBus,monGain,recDest,analyser;
 var audio=new Audio(); audio.preload='auto'; audio.setAttribute('playsinline','');
 audio.preservesPitch=true; audio.webkitPreservesPitch=true;
 var songTitle='song', monitorOn=true, recording=false, recorder=null, chunks=[], recMime='', lastBlob=null, lastUrl=null, seeking=false, lyrAuto=true;
@@ -219,6 +227,8 @@ $('file').addEventListener('change',function(){
  audio.src=URL.createObjectURL(f);
  songTitle=f.name.replace(/\.[^.]+$/,'');
  $('songName').textContent=f.name;
+ try{lyrStart=parseFloat(localStorage.getItem('isingalong-ls-'+songTitle))||0}catch(e){lyrStart=0}
+ updLS();
  ['seek','restart','play','recBtn'].forEach(function(id){$(id).disabled=false});
  $('play').textContent='▶ Play';
  audio.load();
@@ -227,7 +237,7 @@ audio.addEventListener('loadedmetadata',function(){$('tDur').textContent=fmt(aud
 audio.addEventListener('timeupdate',function(){
  $('tCur').textContent=fmt(audio.currentTime);
  if(!seeking&&audio.duration)$('seek').value=Math.round(audio.currentTime/audio.duration*1000);
- if(lyrAuto&&$('lyricsView').style.display==='block'&&audio.duration&&!audio.paused){var v=$('lyricsView');v.scrollTop=(audio.currentTime/audio.duration)*(v.scrollHeight-v.clientHeight)}
+ if(lyrAuto&&$('lyricsView').style.display==='block'&&audio.duration&&!audio.paused){var v=$('lyricsView'),dd=audio.duration-lyrStart,pp=dd>0?Math.max(0,Math.min(1,(audio.currentTime-lyrStart)/dd)):0;v.scrollTop=pp*(v.scrollHeight-v.clientHeight)}
 });
 audio.addEventListener('ended',function(){$('play').textContent='▶ Play';if(recording)stopRec()});
 audio.addEventListener('pause',function(){$('play').textContent='▶ Play'});
@@ -287,7 +297,7 @@ function startRec(){
   recorder.onstop=function(){
    lastBlob=new Blob(chunks,{type:recorder.mimeType||recMime||'audio/mp4'});
    if(lastUrl)URL.revokeObjectURL(lastUrl);lastUrl=URL.createObjectURL(lastBlob);
-   $('resAudio').src=lastUrl;$('result').style.display='block';$('recNote').textContent='Done! Listen back, then share or save.';
+   $('resAudio').src=lastUrl;$('rSeek').value=0;$('rCur').textContent='0:00';$('rDur').textContent='0:00';$('rPlay').textContent='▶';$('result').style.display='block';$('recNote').textContent='Done! Listen back, then share or save.';
   };
   recorder.start(500);recording=true;
   var t0=Date.now();clearInterval(recTimer);recTimer=setInterval(function(){if(recording)$('recNote').textContent='Recording… '+fmt((Date.now()-t0)/1000)},500);
@@ -331,6 +341,23 @@ $('shareBtn').onclick=function(){
 ui();
 $('fs').dispatchEvent(new Event('input'));
 
+function updLS(){$('lsNote').textContent='Lyrics start scrolling at '+fmt(lyrStart)+'. Play the song and tap the button when the singing begins.'}
+function setLS(v){lyrStart=v;try{localStorage.setItem('isingalong-ls-'+songTitle,String(v))}catch(e){}updLS()}
+$('lsSet').onclick=function(){setLS(audio.currentTime||0)};
+$('lsReset').onclick=function(){setLS(0)};
+updLS();
+var ra=$('resAudio'),rSeeking=false;
+function rdur(){var d=ra.duration;return isFinite(d)?d:0}
+function rdurShow(){$('rDur').textContent=fmt(rdur())}
+$('rPlay').onclick=function(){if(ra.paused)ra.play();else ra.pause()};
+ra.addEventListener('play',function(){$('rPlay').textContent='⏸'});
+ra.addEventListener('pause',function(){$('rPlay').textContent='▶'});
+ra.addEventListener('ended',function(){$('rPlay').textContent='▶'});
+ra.addEventListener('loadedmetadata',rdurShow);
+ra.addEventListener('durationchange',rdurShow);
+ra.addEventListener('timeupdate',function(){$('rCur').textContent=fmt(ra.currentTime);var d=rdur();if(d&&!rSeeking)$('rSeek').value=Math.round(ra.currentTime/d*1000)});
+$('rSeek').addEventListener('input',function(){rSeeking=true;var d=rdur();if(d)ra.currentTime=this.value/1000*d});
+$('rSeek').addEventListener('change',function(){rSeeking=false});
 function listInputs(){
  if(!navigator.mediaDevices||!navigator.mediaDevices.enumerateDevices)return;
  navigator.mediaDevices.enumerateDevices().then(function(ds){
